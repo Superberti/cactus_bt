@@ -464,8 +464,13 @@ vector<uint8_t> GetLEDsPercent(double aPercent)
 void app_cpp_main(void *pvParameters)
 {
   bool toggle = false;
+  
+  // Eingang WS28128-LED-Band
   gpioSetup(17, OUTPUT, LOW);
+  // rote LED auf dem ESP32
   gpioSetup(2, OUTPUT, HIGH);
+  // Kleine Kaktus-Lichterkette
+  gpioSetup(5, OUTPUT, LOW);
 
   digitalLeds_initDriver();
 
@@ -521,7 +526,7 @@ void app_cpp_main(void *pvParameters)
     SetCactusPercent(i, Color);
     delay(50);
   }
-
+  bool toggle2=false;
   for (;;)
   {
     if (gActiveEffect > 0)
@@ -530,6 +535,8 @@ void app_cpp_main(void *pvParameters)
     CurrentTime = millis();
     if ((CurrentTime - LastTime) > 1000)
     {
+      toggle2 = !toggle2;
+      gpio_set_level(GPIO_NUM_5, (uint32_t)toggle2);
       LastTime = CurrentTime;
       if (smConnected)
       {
