@@ -45,11 +45,13 @@ using namespace std;
 
 static bool smConnected = false;
 static char *pCurrentCommandLine;
+static char gErrorAnswer[10] = {};
+static char *gOKAnswer = "OK\r\n";
 
 // -1=Effekte aus, 0=DEMO-Modus, 1..59 Einzeleffekte
 int gActiveEffect = 0;
 
-static volatile bool gUserBreak=false;
+static volatile bool gUserBreak = false;
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
 static const char *TAG = "BT Cactus";
 
@@ -197,7 +199,14 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
     int length = min(MAX_LINE_SIZE, param->data_ind.len + 1);
     memcpy(pCurrentCommandLine, param->data_ind.data, length);
     pCurrentCommandLine[length - 1] = 0;
-    ProcessCommandLine(pCurrentCommandLine);
+    int Err = ProcessCommandLine(pCurrentCommandLine);
+    if (Err == ERR_OK)
+      esp_spp_write(param->write.handle, strlen(gOKAnswer), (uint8_t *)gOKAnswer);
+    else
+    {
+      sprintf(gErrorAnswer, "ERR %d\r\n", Err);
+      esp_spp_write(param->write.handle, strlen(gErrorAnswer), (uint8_t *)gErrorAnswer);
+    }
   }
   break;
   case ESP_SPP_CONG_EVT:
@@ -465,19 +474,19 @@ vector<uint8_t> GetLEDsPercent(double aPercent)
   return Leds;
 }
 
-void ShuffleArray(std::vector<int> & aArrayToShuffle)
+void ShuffleArray(std::vector<int> &aArrayToShuffle)
 {
-  srand(time(0)); 
-  for (int i=aArrayToShuffle.size()-1;i>0;i--)
+  srand(time(0));
+  for (int i = aArrayToShuffle.size() - 1; i > 0; i--)
   {
-    int r = rand() % (i+1);
-    std::swap(aArrayToShuffle[r],aArrayToShuffle[i]);
+    int r = rand() % (i + 1);
+    std::swap(aArrayToShuffle[r], aArrayToShuffle[i]);
   }
 }
 
 std::vector<int> CreateDemoArray()
 {
-  std::vector<int> DemoArray={1,2,3,4,5,6,7,10,12,14,18,20,22,27,32,33,35,39,43,46,55};
+  std::vector<int> DemoArray = {1, 2, 3, 4, 5, 6, 7, 10, 12, 14, 18, 20, 22, 27, 32, 33, 35, 39, 43, 46, 55};
   ShuffleArray(DemoArray);
   return DemoArray;
 }
@@ -485,7 +494,7 @@ std::vector<int> CreateDemoArray()
 void app_cpp_main(void *pvParameters)
 {
   bool toggle = false;
-  
+
   // Eingang WS28128-LED-Band
   gpioSetup(GPIO_NUM_17, OUTPUT, LOW);
   // rote LED auf dem ESP32
@@ -528,7 +537,7 @@ void app_cpp_main(void *pvParameters)
   uint32_t CurrentTime = 0;
   uint32_t LastTime = millis();
   Rainbower MyRainbow;
-  bool ConnectMsg = true;
+  //bool ConnectMsg = true;
   for (int i = 0; i <= 100; i += 5)
   {
     MyRainbow.drawNext();
@@ -547,33 +556,32 @@ void app_cpp_main(void *pvParameters)
     SetCactusPercent(i, Color);
     delay(50);
   }
-  std::vector<int>DemoVec;
+  std::vector<int> DemoVec;
   strand_t *pStrand = &STRANDS[0];
-  int LastEffect=gActiveEffect;
+  int LastEffect = gActiveEffect;
   for (;;)
   {
     if (gActiveEffect > -1)
     {
-      LastEffect=gActiveEffect;
-      int Effect=gActiveEffect;
-      int time=0;
-      if (Effect==0)
+      LastEffect = gActiveEffect;
+      int Effect = gActiveEffect;
+      int time = 0;
+      if (Effect == 0)
       {
-        if (DemoVec.size()==0)
-          DemoVec=CreateDemoArray();
-        
-        Effect=DemoVec.at(0);
+        if (DemoVec.size() == 0)
+          DemoVec = CreateDemoArray();
+
+        Effect = DemoVec.at(0);
         DemoVec.erase(DemoVec.begin());
         // Demo-Modus
-        time=30000;
+        time = 30000;
       }
-      
+
       LedEffect(Effect, time); // Effektschleife aktivieren
-      
     }
-    else if (gActiveEffect == -1 && LastEffect!=-1)
+    else if (gActiveEffect == -1 && LastEffect != -1)
     {
-      LastEffect=gActiveEffect;
+      LastEffect = gActiveEffect;
       // Kaktus ausschalten
       pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
       for (int t = 0; t < pStrand->numPixels; t++)
@@ -587,7 +595,7 @@ void app_cpp_main(void *pvParameters)
     if ((CurrentTime - LastTime) > 1000)
     {
       toggle = !toggle;
-      gpio_set_level(GPIO_NUM_5,smConnected ? 0 : (uint32_t)toggle);
+      gpio_set_level(GPIO_NUM_5, smConnected ? 0 : (uint32_t)toggle);
       gpio_set_level(GPIO_NUM_2, (uint32_t)toggle);
       LastTime = CurrentTime;
       /*
@@ -625,7 +633,7 @@ void app_cpp_main(void *pvParameters)
 
 bool LedEffect(int aEffectNum, int aDuration_ms)
 {
-  gUserBreak=false;
+  gUserBreak = false;
   bool toggle = true;
   strand_t *pStrand = &STRANDS[0];
 
@@ -636,7 +644,7 @@ bool LedEffect(int aEffectNum, int aDuration_ms)
   WS2812FX ws2812fx(pStrand);
 
   ws2812fx.setSpeed(100);
-  if (aEffectNum==46)
+  if (aEffectNum == 46)
     ws2812fx.setSpeed(20);
   if (aEffectNum > 7 && aEffectNum < 60)
   {
@@ -649,7 +657,7 @@ bool LedEffect(int aEffectNum, int aDuration_ms)
 
   int StartTime = millis();
   int i = 0;
-  while ((((millis() - StartTime) < aDuration_ms) || aDuration_ms==0) && !gUserBreak)
+  while ((((millis() - StartTime) < aDuration_ms) || aDuration_ms == 0) && !gUserBreak)
   {
     switch (aEffectNum)
     {
@@ -888,9 +896,9 @@ uint32_t ProcessCommandLine(char *aCmdLine)
       return ERR_PARAM_OUT_OF_BOUNDS;
     }
     ESP_LOGI(TAG, "Loading Effect number: %s", iTokens.at(1).c_str());
-    ESP_LOGI(TAG, "Command line: %s",aCmdLine);
+    ESP_LOGI(TAG, "Command line: %s", aCmdLine);
     gActiveEffect = EffectNumber;
-    gUserBreak=true;
+    gUserBreak = true;
     break;
   }
   case eCMD_FILL_CACTUS:
@@ -959,4 +967,3 @@ void SetCactusPercent(int aPercentage, pixelColor_t aColor)
   strand_t *MyStrand[] = {pStrand};
   digitalLeds_drawPixels(MyStrand, STRANDCNT);
 }
-
