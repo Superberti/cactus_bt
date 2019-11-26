@@ -229,6 +229,11 @@ void WS2812FX::setColor(uint32_t c)
   setColor(0, c);
 }
 
+void WS2812FX::setColor(pixelColor_t c)
+{
+  setColor(0, (uint32_t)c.raw32);
+}
+
 void WS2812FX::setColor(uint8_t seg, uint32_t c)
 {
   _segments[seg].colors[0] = c;

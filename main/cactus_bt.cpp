@@ -45,6 +45,7 @@ using namespace std;
 
 static bool smConnected = false;
 static char *pCurrentCommandLine;
+// -1=Effekte aus, 0=DEMO-Modus, 1..59 Einzeleffekte
 int gActiveEffect = 0;
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
 static const char *TAG = "BT Cactus";
@@ -461,6 +462,14 @@ vector<uint8_t> GetLEDsPercent(double aPercent)
   return Leds;
 }
 
+void ShuffleArray(std::vector<uint32_t> & aArrayToShuffle)
+{
+  for (int i=aArrayToShuffle.size()-1;i>0;i--)
+  {
+    
+  }
+}
+
 void app_cpp_main(void *pvParameters)
 {
   bool toggle = false;
@@ -529,8 +538,16 @@ void app_cpp_main(void *pvParameters)
   bool toggle2=false;
   for (;;)
   {
-    if (gActiveEffect > 0)
-      LedEffect(-1, 0); // Effektschleife aktivieren
+    if (gActiveEffect > -1)
+    {
+      int Effect=gActiveEffect;
+      int time=0;
+      if (Effect==0)
+      {
+        // Demo-Modus
+      }
+      LedEffect(Effect, time); // Effektschleife aktivieren
+    }
     // Status der LEDs jede Sekunde veröffentlichen
     CurrentTime = millis();
     if ((CurrentTime - LastTime) > 1000)
@@ -695,9 +712,9 @@ uint32_t ProcessCommandLine(char *aCmdLine)
   case eCMD_LED_EFFECT:
   {
     int EffectNumber = strtol(iTokens.at(1).c_str(), NULL, 10);
-    if (EffectNumber < 0 || EffectNumber > 59)
+    if (EffectNumber < -1 || EffectNumber > 59)
     {
-      ESP_LOGI(TAG, "Effect number out of bounds (0-59): %s", iTokens.at(1).c_str());
+      ESP_LOGI(TAG, "Effect number out of bounds (-1 - 59): %s", iTokens.at(1).c_str());
       return ERR_PARAM_OUT_OF_BOUNDS;
     }
     gActiveEffect = EffectNumber;
@@ -719,6 +736,18 @@ uint32_t ProcessCommandLine(char *aCmdLine)
     }
     pixelColor_t Color = pixelFromRGB(r, g, b);
     SetCactusPercent(FillPercent, Color);
+    break;
+  }
+  case eCMD_DEMO:
+  {
+    bool onoff=true;
+    if (iTokens.size()>1)
+    {
+      int MyInt = strtol(iTokens.at(1).c_str(), NULL, 10);
+      if (MyInt==0)
+        onoff=false;
+    }
+    gActiveEffect=0;
     break;
   }
   default:
@@ -814,6 +843,8 @@ void LedEffect(int aEffectNum, int aDuration_ms)
         if (CurrentEffect > 7 && CurrentEffect < 60)
         {
           ws2812fx.stop();
+          pixelColor_t RandomColor = pixelFromRGB(rand() % 256, rand() % 256, rand() % 256);
+          ws2812fx.setColor(RandomColor);
           ws2812fx.setMode(CurrentEffect);
           ws2812fx.start();
         }

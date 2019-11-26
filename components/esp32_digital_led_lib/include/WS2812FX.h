@@ -422,6 +422,7 @@ public:
       setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w),
       setColor(uint32_t c),
       setColor(uint8_t seg, uint32_t c),
+      setColor(pixelColor_t c),
       setColors(uint8_t seg, uint32_t *c),
       setLength(uint16_t b),
       increaseLength(uint16_t s),

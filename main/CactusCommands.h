@@ -18,38 +18,40 @@
 #define CLIENT_BASE64   "BASE64"    ///< Es kommen Base64-kodierte Werte
 
 
-/// Kommandos
+// Kommandos
 
-/// Alle Kommandos sowie alle Parameter sind in Klartext als Strings gehalten.
-/// Einzige Ausnahme ist hierbei die Antwort beim Lesen vom Server mit CLIENT_BINDATA
-/// Nach diesem Konstrukt muessen die darauffolgenden Daten binaer gelesen werden.
-/// Ist alles in Ordnung, so antwortet der Server mit: OK Rueckgabeparameter1..2..n.
-/// Bei einem Fehler antwortet der Server mit ERR Fehlernummer Klartext.
-/// Ein Clientkommando beginnt immer mit dem in CocoaCommands[] definierten Kommandostrings
-/// und den Parametern, die mit Leerzeichen getrennt werden. Gibt es in einem Parameter
-/// Leerzeichen, so ist der Parameter in Anfuehrungszeichen zu setzen.
-/// Alle Befehle und Antworten muessen in einer Zeile stehen und enden mit einem Return.
+// Alle Kommandos sowie alle Parameter sind in Klartext als Strings gehalten.
+// Einzige Ausnahme ist hierbei die Antwort beim Lesen vom Server mit CLIENT_BINDATA
+// Nach diesem Konstrukt muessen die darauffolgenden Daten binaer gelesen werden.
+// Ist alles in Ordnung, so antwortet der Server mit: OK Rueckgabeparameter1..2..n.
+// Bei einem Fehler antwortet der Server mit ERR Fehlernummer Klartext.
+// Ein Clientkommando beginnt immer mit dem in CocoaCommands[] definierten Kommandostrings
+// und den Parametern, die mit Leerzeichen getrennt werden. Gibt es in einem Parameter
+// Leerzeichen, so ist der Parameter in Anfuehrungszeichen zu setzen.
+// Alle Befehle und Antworten muessen in einer Zeile stehen und enden mit einem Return.
 enum TCactusCommand {
-	/// Unbekanntes Kommando
+	// Unbekanntes Kommando
 	eCMD_UNKNOWN 						= 0,
  
-  /// RGB-Wert einer spezifischen LED setzen (0-143)
-  /// Parameter: LED-Nummer, R, G, B
-  /// Beispiel: "SETLED 99 255 128 255"
+  // RGB-Wert einer spezifischen LED setzen (0-143)
+  // Parameter: LED-Nummer, R, G, B
+  // Beispiel: "SETLED 99 255 128 255"
   eCMD_SET_LED = 1,
 
-  /// Einen Bereich (Start bis Ende) von LEDs setzen
-  /// Parameter: Start-LED-Nummer, End-LED-Nummer, Rs, Gs, Bs ... Re, Ge, Be
+  // Einen Bereich (Start bis Ende) von LEDs setzen
+  // Parameter: Start-LED-Nummer, End-LED-Nummer, Rs, Gs, Bs ... Re, Ge, Be
   eCMD_SET_LED_RANGE = 2,
 
-  /// LED-Effekt abspielen
-  /// Parameter: Effektnummer (0=aus)
+  // LED-Effekt abspielen
+  // Parameter: Effektnummer (0=aus)
   eCMD_LED_EFFECT = 3,
 
-  /// LED-Füllgrad in Prozent setzen (mit Farbe)
-  /// Parameter: Füllgrad in Prozent, R, G, B
+  // LED-Füllgrad in Prozent setzen (mit Farbe)
+  // Parameter: Füllgrad in Prozent, R, G, B
   eCMD_FILL_CACTUS = 4,
 
+  // KAKTUS-DEMO-Modus einschalten
+  eCMD_DEMO = 5,
 };
 
 /// Kommandostruktur. Bindet den Befehl an eine feste Zeichenkette
@@ -75,6 +77,7 @@ const TCommandStruct CactusCommands[] = {
   {eCMD_SET_LED_RANGE,    "SETLEDRANGE"	          ,5 },
   {eCMD_LED_EFFECT,       "LEDEFFECT"	            ,1 },
   {eCMD_FILL_CACTUS,      "FILLCACTUS"	          ,4 },
+  {eCMD_DEMO,             "DEMO"	                ,0 },
 };
 
 #endif
