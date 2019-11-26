@@ -45,8 +45,11 @@ using namespace std;
 
 static bool smConnected = false;
 static char *pCurrentCommandLine;
+
 // -1=Effekte aus, 0=DEMO-Modus, 1..59 Einzeleffekte
 int gActiveEffect = 0;
+
+static volatile bool gUserBreak=false;
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
 static const char *TAG = "BT Cactus";
 
@@ -57,7 +60,7 @@ static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
 void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param);
 static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param);
 void app_cpp_main(void *);
-void LedEffect(int aEffectNum, int aDuration_ms);
+bool LedEffect(int aEffectNum, int aDuration_ms);
 vector<uint8_t> GetLEDsPercent(double aPercent);
 int CheckRGB(std::string &, std::string &, std::string &, int &, int &, int &);
 void SetCactusPercent(int aPercentage, pixelColor_t aColor);
@@ -69,7 +72,7 @@ strand_t STRANDS[] = {
     {.rmtChannel = 0, .gpioNum = 17, .ledType = LED_WS2813_V2, .brightLimit = 255, .numPixels = NUM_LEDS, .pixels = NULL, ._stateVars = NULL},
 };
 
-int STRANDCNT = sizeof(STRANDS) / sizeof(STRANDS[0]);
+const int STRANDCNT = sizeof(STRANDS) / sizeof(STRANDS[0]);
 
 extern "C" void app_main(void)
 {
@@ -462,12 +465,21 @@ vector<uint8_t> GetLEDsPercent(double aPercent)
   return Leds;
 }
 
-void ShuffleArray(std::vector<uint32_t> & aArrayToShuffle)
+void ShuffleArray(std::vector<int> & aArrayToShuffle)
 {
+  srand(time(0)); 
   for (int i=aArrayToShuffle.size()-1;i>0;i--)
   {
-    
+    int r = rand() % (i+1);
+    std::swap(aArrayToShuffle[r],aArrayToShuffle[i]);
   }
+}
+
+std::vector<int> CreateDemoArray()
+{
+  std::vector<int> DemoArray={1,2,3,4,5,6,7,10,12,14,18,20,22,27,32,33,35,39,43,46,55};
+  ShuffleArray(DemoArray);
+  return DemoArray;
 }
 
 void app_cpp_main(void *pvParameters)
@@ -475,11 +487,11 @@ void app_cpp_main(void *pvParameters)
   bool toggle = false;
   
   // Eingang WS28128-LED-Band
-  gpioSetup(17, OUTPUT, LOW);
+  gpioSetup(GPIO_NUM_17, OUTPUT, LOW);
   // rote LED auf dem ESP32
-  gpioSetup(2, OUTPUT, HIGH);
+  gpioSetup(GPIO_NUM_2, OUTPUT, HIGH);
   // Kleine Kaktus-Lichterkette
-  gpioSetup(5, OUTPUT, LOW);
+  gpioSetup(GPIO_NUM_5, OUTPUT, LOW);
 
   digitalLeds_initDriver();
 
@@ -535,26 +547,50 @@ void app_cpp_main(void *pvParameters)
     SetCactusPercent(i, Color);
     delay(50);
   }
-  bool toggle2=false;
+  std::vector<int>DemoVec;
+  strand_t *pStrand = &STRANDS[0];
+  int LastEffect=gActiveEffect;
   for (;;)
   {
     if (gActiveEffect > -1)
     {
+      LastEffect=gActiveEffect;
       int Effect=gActiveEffect;
       int time=0;
       if (Effect==0)
       {
+        if (DemoVec.size()==0)
+          DemoVec=CreateDemoArray();
+        
+        Effect=DemoVec.at(0);
+        DemoVec.erase(DemoVec.begin());
         // Demo-Modus
+        time=30000;
       }
+      
       LedEffect(Effect, time); // Effektschleife aktivieren
+      
+    }
+    else if (gActiveEffect == -1 && LastEffect!=-1)
+    {
+      LastEffect=gActiveEffect;
+      // Kaktus ausschalten
+      pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
+      for (int t = 0; t < pStrand->numPixels; t++)
+      {
+        pStrand->pixels[t] = BlackColor;
+      }
+      digitalLeds_drawPixels(MyStrand, STRANDCNT);
     }
     // Status der LEDs jede Sekunde veröffentlichen
     CurrentTime = millis();
     if ((CurrentTime - LastTime) > 1000)
     {
-      toggle2 = !toggle2;
-      gpio_set_level(GPIO_NUM_5, (uint32_t)toggle2);
+      toggle = !toggle;
+      gpio_set_level(GPIO_NUM_5,smConnected ? 0 : (uint32_t)toggle);
+      gpio_set_level(GPIO_NUM_2, (uint32_t)toggle);
       LastTime = CurrentTime;
+      /*
       if (smConnected)
       {
         if (ConnectMsg)
@@ -580,227 +616,16 @@ void app_cpp_main(void *pvParameters)
         SetCactusPercent(100, Color);
         delay(50);
         SetCactusPercent(0, Color);
-      }
+      }*/
     }
     delay(10);
   }
   vTaskDelete(NULL);
 }
 
-uint32_t ProcessCommandLine(char *aCmdLine)
+bool LedEffect(int aEffectNum, int aDuration_ms)
 {
-  std::vector<std::string> iTokens;
-  KillReturnAndEndl(aCmdLine);
-  string InputLine(aCmdLine);
-  ParseLine(InputLine, iTokens);
-
-  TCactusCommand CurrentCommand = eCMD_UNKNOWN;
-
-  if (iTokens.size() == 0)
-  {
-    ESP_LOGI(TAG, "Empty command detected...");
-    return ERR_EMPTYCMD;
-  }
-  // Nachsehen, welches Kommando gesendet wurde
-  for (unsigned int i = 0; i < sizeof(CactusCommands) / sizeof(CactusCommands[0]); i++)
-  {
-    if (iTokens.at(0) == std::string(CactusCommands[i].mCmdStr))
-    {
-      CurrentCommand = CactusCommands[i].mCmd;
-      break;
-    }
-  }
-  if (CurrentCommand == eCMD_UNKNOWN)
-  {
-    ESP_LOGI(TAG, "Unknown cactus command: %s", iTokens.at(0).c_str());
-    return ERR_UNKNOWNCOMMAND;
-  }
-  if ((int(iTokens.size()) - 1) < CactusCommands[CurrentCommand].mNumParams)
-  {
-    ESP_LOGI(TAG, "Number of parameters incorrect: %d %d %s", int(iTokens.size()) - 1, CactusCommands[CurrentCommand].mNumParams,
-             InputLine.c_str());
-    return ERR_NUMPARAMS;
-  }
-
-  // ESP_LOGI(TAG, "Executing command: %d", CurrentCommand);
-
-  strand_t *pStrand = &STRANDS[0];
-
-  if (gActiveEffect > 0 && CurrentCommand != eCMD_LED_EFFECT)
-  {
-    ESP_LOGI(TAG, "Command not allowed while effect is active: %s", InputLine.c_str());
-    return ERR_EFFECT_RUNNING;
-  }
-
-  // Jetzt können die Kommandos ausgewertet und verarbeitet werden.
-  switch (CurrentCommand)
-  {
-
-  case eCMD_SET_LED:
-  {
-    int iLedNumber = -1;
-    int r, g, b;
-    iLedNumber = strtol(iTokens.at(1).c_str(), NULL, 10);
-    if (iLedNumber < 0 || iLedNumber >= NUM_LEDS)
-    {
-      ESP_LOGI(TAG, "LED number out of bounds (0-%d): %s", NUM_LEDS, iTokens.at(1).c_str());
-      return ERR_PARAM_OUT_OF_BOUNDS;
-    }
-    int Err = CheckRGB(iTokens.at(2), iTokens.at(3), iTokens.at(4), r, g, b);
-    if (Err != ERR_OK)
-    {
-      return Err;
-    }
-
-    pixelColor_t Color = pixelFromRGB(r, g, b);
-
-    pStrand->pixels[iLedNumber] = Color;
-    strand_t *MyStrand[] = {pStrand};
-    digitalLeds_drawPixels(MyStrand, STRANDCNT);
-    ESP_LOGI(TAG, "SETLED %d %d %d %d executed.", iLedNumber, r, g, b);
-    // delay(50);
-    break;
-  }
-  case eCMD_SET_LED_RANGE:
-  {
-    int iStartLedNumber = -1;
-    int iEndLedNumber = -1;
-    int r, g, b;
-    iStartLedNumber = strtol(iTokens.at(1).c_str(), NULL, 10);
-    iEndLedNumber = strtol(iTokens.at(2).c_str(), NULL, 10);
-    if (iStartLedNumber < 0 || iStartLedNumber > NUM_LEDS)
-    {
-      ESP_LOGI(TAG, "Start LED number out of bounds (0-%d): %s", NUM_LEDS, iTokens.at(1).c_str());
-      return ERR_PARAM_OUT_OF_BOUNDS;
-    }
-    if (iEndLedNumber < 0 || iEndLedNumber > NUM_LEDS)
-    {
-      ESP_LOGI(TAG, "End LED number out of bounds (0-%d): %s", NUM_LEDS, iTokens.at(2).c_str());
-      return ERR_PARAM_OUT_OF_BOUNDS;
-    }
-    if (iStartLedNumber > iEndLedNumber)
-    {
-      ESP_LOGI(TAG, "Start LED number > end LED number: Start:%s End:%s", iTokens.at(1).c_str(), iTokens.at(2).c_str());
-      return ERR_PARAM_OUT_OF_BOUNDS;
-    }
-    int NumLedsToSet = iEndLedNumber - iStartLedNumber + 1;
-    int ExpectedParams = NumLedsToSet * 3;
-    if (ExpectedParams > iTokens.size() - 3)
-    {
-      ESP_LOGI(TAG, "Too few RGB parameters. Expected %d, got %d", ExpectedParams, iTokens.size() - 3);
-      return ERR_PARAM_OUT_OF_BOUNDS;
-    }
-    // ESP_LOGI(TAG, "Start:%d End:%d Num LEDs to set:%d", iStartLedNumber, iEndLedNumber, NumLedsToSet);
-    for (int i = iStartLedNumber; i <= iEndLedNumber; i++)
-    {
-      int Err = CheckRGB(iTokens.at(3 + (i - iStartLedNumber) * 3), iTokens.at(4 + (i - iStartLedNumber) * 3),
-                         iTokens.at(5 + (i - iStartLedNumber) * 3), r, g, b);
-      // printf("r:%d g%d b%d",r,g,b);
-      if (Err != ERR_OK)
-      {
-        return Err;
-      }
-
-      pixelColor_t Color = pixelFromRGB(r, g, b);
-
-      pStrand->pixels[i] = Color;
-    }
-    strand_t *MyStrand[] = {pStrand};
-    digitalLeds_drawPixels(MyStrand, STRANDCNT);
-    break;
-  }
-  case eCMD_LED_EFFECT:
-  {
-    int EffectNumber = strtol(iTokens.at(1).c_str(), NULL, 10);
-    if (EffectNumber < -1 || EffectNumber > 59)
-    {
-      ESP_LOGI(TAG, "Effect number out of bounds (-1 - 59): %s", iTokens.at(1).c_str());
-      return ERR_PARAM_OUT_OF_BOUNDS;
-    }
-    gActiveEffect = EffectNumber;
-    break;
-  }
-  case eCMD_FILL_CACTUS:
-  {
-    int r, g, b;
-    int FillPercent = strtol(iTokens.at(1).c_str(), NULL, 10);
-    if (FillPercent < 0 || FillPercent > 100)
-    {
-      ESP_LOGI(TAG, "Percentage out of bounds (0-100): %s", iTokens.at(1).c_str());
-      return ERR_PARAM_OUT_OF_BOUNDS;
-    }
-    int Err = CheckRGB(iTokens.at(2), iTokens.at(3), iTokens.at(4), r, g, b);
-    if (Err != ERR_OK)
-    {
-      return Err;
-    }
-    pixelColor_t Color = pixelFromRGB(r, g, b);
-    SetCactusPercent(FillPercent, Color);
-    break;
-  }
-  case eCMD_DEMO:
-  {
-    bool onoff=true;
-    if (iTokens.size()>1)
-    {
-      int MyInt = strtol(iTokens.at(1).c_str(), NULL, 10);
-      if (MyInt==0)
-        onoff=false;
-    }
-    gActiveEffect=0;
-    break;
-  }
-  default:
-  {
-    ESP_LOGI(TAG, "Command not (yet) implemented: %s", InputLine.c_str());
-    return ERR_CMD_NOTSUPPORTED;
-  }
-  }
-  return ERR_OK;
-}
-
-int CheckRGB(std::string &rs, std::string &gs, std::string &bs, int &r, int &g, int &b)
-{
-  r = -1;
-  g = -1;
-  b = -1;
-  r = strtol(rs.c_str(), NULL, 10);
-  g = strtol(gs.c_str(), NULL, 10);
-  b = strtol(bs.c_str(), NULL, 10);
-
-  if (r < 0 || r > 255)
-  {
-    ESP_LOGI(TAG, "Parameter red out of bounds (0-255): %s", rs.c_str());
-    return ERR_PARAM_OUT_OF_BOUNDS;
-  }
-  if (g < 0 || g > 255)
-  {
-    ESP_LOGI(TAG, "Parameter green out of bounds (0-255): %s", gs.c_str());
-    return ERR_PARAM_OUT_OF_BOUNDS;
-  }
-  if (b < 0 || b > 255)
-  {
-    ESP_LOGI(TAG, "Parameter blue out of bounds (0-255): %s", bs.c_str());
-    return ERR_PARAM_OUT_OF_BOUNDS;
-  }
-  return ERR_OK;
-}
-
-void SetCactusPercent(int aPercentage, pixelColor_t aColor)
-{
-  strand_t *pStrand = &STRANDS[0];
-  pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
-  vector<uint8_t> Leds = GetLEDsPercent(aPercentage);
-  for (int t = 0; t < pStrand->numPixels; t++)
-    pStrand->pixels[t] = BlackColor;
-  for (int t = 0; t < Leds.size(); t++)
-    pStrand->pixels[Leds.at(t)] = aColor;
-  strand_t *MyStrand[] = {pStrand};
-  digitalLeds_drawPixels(MyStrand, STRANDCNT);
-}
-
-void LedEffect(int aEffectNum, int aDuration_ms)
-{
+  gUserBreak=false;
   bool toggle = true;
   strand_t *pStrand = &STRANDS[0];
 
@@ -809,49 +634,24 @@ void LedEffect(int aEffectNum, int aDuration_ms)
   FireworksEffects Firework(pStrand);
   strand_t *MyStrand[] = {pStrand};
   WS2812FX ws2812fx(pStrand);
+
   ws2812fx.setSpeed(100);
-  ws2812fx.setColor(0x007BFF);
+  if (aEffectNum==46)
+    ws2812fx.setSpeed(20);
+  if (aEffectNum > 7 && aEffectNum < 60)
+  {
+    ws2812fx.stop();
+    pixelColor_t RandomColor = pixelFromRGB(rand() % 256, rand() % 256, rand() % 256);
+    ws2812fx.setColor(RandomColor);
+    ws2812fx.setMode(aEffectNum);
+    ws2812fx.start();
+  }
 
   int StartTime = millis();
   int i = 0;
-  // Bei aEffectNum=-1 wird auf den gActiveEffect gelauscht
-  int LastEffect = 0;
-  while (((millis() - StartTime) < aDuration_ms) || aEffectNum == -1)
+  while ((((millis() - StartTime) < aDuration_ms) || aDuration_ms==0) && !gUserBreak)
   {
-    int CurrentEffect = aEffectNum;
-    if (aEffectNum == -1)
-    {
-      if (gActiveEffect == 0)
-      {
-        // Kaktus ausschalten
-        pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
-        for (int t = 0; t < pStrand->numPixels; t++)
-        {
-          pStrand->pixels[t] = BlackColor;
-        }
-        digitalLeds_drawPixels(MyStrand, STRANDCNT);
-        break; // Effektschleife beenden
-      }
-      else
-      {
-        CurrentEffect = gActiveEffect;
-      }
-      // Effekt hat sich geändert?
-      if (LastEffect != CurrentEffect)
-      {
-        LastEffect = CurrentEffect;
-        if (CurrentEffect > 7 && CurrentEffect < 60)
-        {
-          ws2812fx.stop();
-          pixelColor_t RandomColor = pixelFromRGB(rand() % 256, rand() % 256, rand() % 256);
-          ws2812fx.setColor(RandomColor);
-          ws2812fx.setMode(CurrentEffect);
-          ws2812fx.start();
-        }
-      }
-    }
-
-    switch (CurrentEffect)
+    switch (aEffectNum)
     {
     case 1:
     {
@@ -946,7 +746,7 @@ void LedEffect(int aEffectNum, int aDuration_ms)
     }
 
     } // end switch
-    if (CurrentEffect > 7 && CurrentEffect < 60)
+    if (aEffectNum > 7 && aEffectNum < 60)
     {
       ws2812fx.service();
     }
@@ -954,4 +754,209 @@ void LedEffect(int aEffectNum, int aDuration_ms)
     i++;
     gpio_set_level(GPIO_NUM_2, (uint32_t)toggle);
   }
+  return gUserBreak;
 }
+
+uint32_t ProcessCommandLine(char *aCmdLine)
+{
+  std::vector<std::string> iTokens;
+  KillReturnAndEndl(aCmdLine);
+  string InputLine(aCmdLine);
+  ParseLine(InputLine, iTokens);
+
+  TCactusCommand CurrentCommand = eCMD_UNKNOWN;
+
+  if (iTokens.size() == 0)
+  {
+    ESP_LOGI(TAG, "Empty command detected...");
+    return ERR_EMPTYCMD;
+  }
+  // Nachsehen, welches Kommando gesendet wurde
+  for (unsigned int i = 0; i < sizeof(CactusCommands) / sizeof(CactusCommands[0]); i++)
+  {
+    if (iTokens.at(0) == std::string(CactusCommands[i].mCmdStr))
+    {
+      CurrentCommand = CactusCommands[i].mCmd;
+      break;
+    }
+  }
+  if (CurrentCommand == eCMD_UNKNOWN)
+  {
+    ESP_LOGI(TAG, "Unknown cactus command: %s", iTokens.at(0).c_str());
+    return ERR_UNKNOWNCOMMAND;
+  }
+  if ((int(iTokens.size()) - 1) < CactusCommands[CurrentCommand].mNumParams)
+  {
+    ESP_LOGI(TAG, "Number of parameters incorrect: %d %d %s", int(iTokens.size()) - 1, CactusCommands[CurrentCommand].mNumParams,
+             InputLine.c_str());
+    return ERR_NUMPARAMS;
+  }
+
+  // ESP_LOGI(TAG, "Executing command: %d", CurrentCommand);
+
+  strand_t *pStrand = &STRANDS[0];
+
+  if (gActiveEffect > -1 && CurrentCommand != eCMD_LED_EFFECT)
+  {
+    ESP_LOGI(TAG, "Command not allowed while effect is active: %s", InputLine.c_str());
+    return ERR_EFFECT_RUNNING;
+  }
+
+  // Jetzt können die Kommandos ausgewertet und verarbeitet werden.
+  switch (CurrentCommand)
+  {
+
+  case eCMD_SET_LED:
+  {
+    int iLedNumber = -1;
+    int r, g, b;
+    iLedNumber = strtol(iTokens.at(1).c_str(), NULL, 10);
+    if (iLedNumber < 0 || iLedNumber >= NUM_LEDS)
+    {
+      ESP_LOGI(TAG, "LED number out of bounds (0-%d): %s", NUM_LEDS, iTokens.at(1).c_str());
+      return ERR_PARAM_OUT_OF_BOUNDS;
+    }
+    int Err = CheckRGB(iTokens.at(2), iTokens.at(3), iTokens.at(4), r, g, b);
+    if (Err != ERR_OK)
+    {
+      return Err;
+    }
+
+    pixelColor_t Color = pixelFromRGB(r, g, b);
+
+    pStrand->pixels[iLedNumber] = Color;
+    strand_t *MyStrand[] = {pStrand};
+    digitalLeds_drawPixels(MyStrand, STRANDCNT);
+    ESP_LOGI(TAG, "SETLED %d %d %d %d executed.", iLedNumber, r, g, b);
+    // delay(50);
+    break;
+  }
+  case eCMD_SET_LED_RANGE:
+  {
+    int iStartLedNumber = -1;
+    int iEndLedNumber = -1;
+    int r, g, b;
+    iStartLedNumber = strtol(iTokens.at(1).c_str(), NULL, 10);
+    iEndLedNumber = strtol(iTokens.at(2).c_str(), NULL, 10);
+    if (iStartLedNumber < 0 || iStartLedNumber > NUM_LEDS)
+    {
+      ESP_LOGI(TAG, "Start LED number out of bounds (0-%d): %s", NUM_LEDS, iTokens.at(1).c_str());
+      return ERR_PARAM_OUT_OF_BOUNDS;
+    }
+    if (iEndLedNumber < 0 || iEndLedNumber > NUM_LEDS)
+    {
+      ESP_LOGI(TAG, "End LED number out of bounds (0-%d): %s", NUM_LEDS, iTokens.at(2).c_str());
+      return ERR_PARAM_OUT_OF_BOUNDS;
+    }
+    if (iStartLedNumber > iEndLedNumber)
+    {
+      ESP_LOGI(TAG, "Start LED number > end LED number: Start:%s End:%s", iTokens.at(1).c_str(), iTokens.at(2).c_str());
+      return ERR_PARAM_OUT_OF_BOUNDS;
+    }
+    int NumLedsToSet = iEndLedNumber - iStartLedNumber + 1;
+    int ExpectedParams = NumLedsToSet * 3;
+    if (ExpectedParams > iTokens.size() - 3)
+    {
+      ESP_LOGI(TAG, "Too few RGB parameters. Expected %d, got %d", ExpectedParams, iTokens.size() - 3);
+      return ERR_PARAM_OUT_OF_BOUNDS;
+    }
+    // ESP_LOGI(TAG, "Start:%d End:%d Num LEDs to set:%d", iStartLedNumber, iEndLedNumber, NumLedsToSet);
+    for (int i = iStartLedNumber; i <= iEndLedNumber; i++)
+    {
+      int Err = CheckRGB(iTokens.at(3 + (i - iStartLedNumber) * 3), iTokens.at(4 + (i - iStartLedNumber) * 3),
+                         iTokens.at(5 + (i - iStartLedNumber) * 3), r, g, b);
+      // printf("r:%d g%d b%d",r,g,b);
+      if (Err != ERR_OK)
+      {
+        return Err;
+      }
+
+      pixelColor_t Color = pixelFromRGB(r, g, b);
+
+      pStrand->pixels[i] = Color;
+    }
+    strand_t *MyStrand[] = {pStrand};
+    digitalLeds_drawPixels(MyStrand, STRANDCNT);
+    break;
+  }
+  case eCMD_LED_EFFECT:
+  {
+    int EffectNumber = strtol(iTokens.at(1).c_str(), NULL, 10);
+    if (EffectNumber < -1 || EffectNumber > 59)
+    {
+      ESP_LOGI(TAG, "Effect number out of bounds (-1 - 59): %s", iTokens.at(1).c_str());
+      return ERR_PARAM_OUT_OF_BOUNDS;
+    }
+    ESP_LOGI(TAG, "Loading Effect number: %s", iTokens.at(1).c_str());
+    ESP_LOGI(TAG, "Command line: %s",aCmdLine);
+    gActiveEffect = EffectNumber;
+    gUserBreak=true;
+    break;
+  }
+  case eCMD_FILL_CACTUS:
+  {
+    int r, g, b;
+    int FillPercent = strtol(iTokens.at(1).c_str(), NULL, 10);
+    if (FillPercent < 0 || FillPercent > 100)
+    {
+      ESP_LOGI(TAG, "Percentage out of bounds (0-100): %s", iTokens.at(1).c_str());
+      return ERR_PARAM_OUT_OF_BOUNDS;
+    }
+    int Err = CheckRGB(iTokens.at(2), iTokens.at(3), iTokens.at(4), r, g, b);
+    if (Err != ERR_OK)
+    {
+      return Err;
+    }
+    pixelColor_t Color = pixelFromRGB(r, g, b);
+    SetCactusPercent(FillPercent, Color);
+    break;
+  }
+  default:
+  {
+    ESP_LOGI(TAG, "Command not (yet) implemented: %s", InputLine.c_str());
+    return ERR_CMD_NOTSUPPORTED;
+  }
+  }
+  return ERR_OK;
+}
+
+int CheckRGB(std::string &rs, std::string &gs, std::string &bs, int &r, int &g, int &b)
+{
+  r = -1;
+  g = -1;
+  b = -1;
+  r = strtol(rs.c_str(), NULL, 10);
+  g = strtol(gs.c_str(), NULL, 10);
+  b = strtol(bs.c_str(), NULL, 10);
+
+  if (r < 0 || r > 255)
+  {
+    ESP_LOGI(TAG, "Parameter red out of bounds (0-255): %s", rs.c_str());
+    return ERR_PARAM_OUT_OF_BOUNDS;
+  }
+  if (g < 0 || g > 255)
+  {
+    ESP_LOGI(TAG, "Parameter green out of bounds (0-255): %s", gs.c_str());
+    return ERR_PARAM_OUT_OF_BOUNDS;
+  }
+  if (b < 0 || b > 255)
+  {
+    ESP_LOGI(TAG, "Parameter blue out of bounds (0-255): %s", bs.c_str());
+    return ERR_PARAM_OUT_OF_BOUNDS;
+  }
+  return ERR_OK;
+}
+
+void SetCactusPercent(int aPercentage, pixelColor_t aColor)
+{
+  strand_t *pStrand = &STRANDS[0];
+  pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
+  vector<uint8_t> Leds = GetLEDsPercent(aPercentage);
+  for (int t = 0; t < pStrand->numPixels; t++)
+    pStrand->pixels[t] = BlackColor;
+  for (int t = 0; t < Leds.size(); t++)
+    pStrand->pixels[Leds.at(t)] = aColor;
+  strand_t *MyStrand[] = {pStrand};
+  digitalLeds_drawPixels(MyStrand, STRANDCNT);
+}
+

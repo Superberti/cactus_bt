@@ -50,8 +50,6 @@ enum TCactusCommand {
   // Parameter: Füllgrad in Prozent, R, G, B
   eCMD_FILL_CACTUS = 4,
 
-  // KAKTUS-DEMO-Modus einschalten
-  eCMD_DEMO = 5,
 };
 
 /// Kommandostruktur. Bindet den Befehl an eine feste Zeichenkette
@@ -77,7 +75,6 @@ const TCommandStruct CactusCommands[] = {
   {eCMD_SET_LED_RANGE,    "SETLEDRANGE"	          ,5 },
   {eCMD_LED_EFFECT,       "LEDEFFECT"	            ,1 },
   {eCMD_FILL_CACTUS,      "FILLCACTUS"	          ,4 },
-  {eCMD_DEMO,             "DEMO"	                ,0 },
 };
 
 #endif
