@@ -46,7 +46,7 @@ using namespace std;
 static bool smConnected = false;
 static char *pCurrentCommandLine;
 static char gErrorAnswer[10] = {};
-static char *gOKAnswer = "OK\r\n";
+static const char *gOKAnswer = "OK\r\n";
 
 // -1=Effekte aus, 0=DEMO-Modus, 1..59 Einzeleffekte
 int gActiveEffect = 0;
@@ -63,7 +63,6 @@ void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param);
 static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param);
 void app_cpp_main(void *);
 bool LedEffect(int aEffectNum, int aDuration_ms);
-vector<uint8_t> GetLEDsPercent(double aPercent);
 int CheckRGB(std::string &, std::string &, std::string &, int &, int &, int &);
 void SetCactusPercent(int aPercentage, pixelColor_t aColor);
 uint32_t ProcessCommandLine(char *aCmdLine);
@@ -156,8 +155,22 @@ extern "C" void app_main(void)
                           0,              /* Priority of the task */
                           NULL,           /* Task handle. */
                           1);             /* Core where the task should run */
+  // Kleine Kaktus-Lichterkette
+  gpioSetup(GPIO_NUM_5, OUTPUT, LOW);
+
+  uint32_t CurrentTime = 0;
+  uint32_t LastTime = millis();
+  bool toggle = false;
   while (true)
   {
+    // Status der LEDs jede Sekunde veröffentlichen
+    CurrentTime = millis();
+    if ((CurrentTime - LastTime) > 1000)
+    {
+      toggle = !toggle;
+      gpio_set_level(GPIO_NUM_5, smConnected ? 0 : (uint32_t)toggle);
+      LastTime = CurrentTime;
+    }
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
   free(pCurrentCommandLine);
@@ -430,56 +443,11 @@ void scanner(strand_t *pStrand, unsigned long delay_ms, unsigned long timeout_ms
   }
 }
 
-// digitales Abbild des Kaktus, jeden cm abgerastert von unten nach oben
-const vector<vector<uint8_t>> cactus{
-    {0, 143},
-    {1, 2, 142},
-    {3, 4, 140, 141},
-    {5, 139},
-    {6, 138},
-    {7, 8, 136, 137},
-    {9, 135},
-    {10, 133, 134},
-    {11, 131, 132},
-    {12, 13, 127, 128, 129, 130},
-    {14, 15, 16, 125, 126, 96, 97, 98, 99},
-    {17, 18, 19, 94, 95, 100, 101, 124, 123},
-    {20, 48, 49, 92, 93, 102, 103, 121, 122},
-    {21, 22, 46, 47, 50, 51, 90, 91, 104, 120},
-    {23, 44, 45, 52, 53, 88, 89, 105, 119},
-    {24, 43, 54, 87, 106, 107, 117, 118},
-    {25, 26, 41, 42, 55, 86, 108, 116},
-    {27, 40, 56, 57, 85, 109, 115},
-    {28, 29, 38, 39, 58, 59, 84, 83, 110, 111, 113, 114},
-    {30, 31, 37, 60, 81, 82, 112},
-    {32, 36, 61, 80},
-    {33, 34, 35, 62, 79, 78},
-    {63, 64, 77},
-    {65, 75, 76},
-    {66, 74, 67},
-    {68, 73},
-    {69, 72},
-    {70, 71},
-};
-
-vector<uint8_t> GetLEDsPercent(double aPercent)
-{
-  const int Columns = cactus.size();
-  int MaxCol = int(Columns * (aPercent / 100.0) + 0.5);
-  vector<uint8_t> Leds;
-  for (int i = 0; i < MaxCol; i++)
-  {
-    Leds.insert(Leds.end(), cactus.at(i).begin(), cactus.at(i).end());
-  }
-  return Leds;
-}
-
 void ShuffleArray(std::vector<int> &aArrayToShuffle)
 {
-  srand(time(0));
   for (int i = aArrayToShuffle.size() - 1; i > 0; i--)
   {
-    int r = rand() % (i + 1);
+    int r = esp_random() % (i + 1);
     std::swap(aArrayToShuffle[r], aArrayToShuffle[i]);
   }
 }
@@ -499,8 +467,6 @@ void app_cpp_main(void *pvParameters)
   gpioSetup(GPIO_NUM_17, OUTPUT, LOW);
   // rote LED auf dem ESP32
   gpioSetup(GPIO_NUM_2, OUTPUT, HIGH);
-  // Kleine Kaktus-Lichterkette
-  gpioSetup(GPIO_NUM_5, OUTPUT, LOW);
 
   digitalLeds_initDriver();
 
@@ -634,9 +600,8 @@ void app_cpp_main(void *pvParameters)
 bool LedEffect(int aEffectNum, int aDuration_ms)
 {
   gUserBreak = false;
-  bool toggle = true;
   strand_t *pStrand = &STRANDS[0];
-
+  bool toggle = true;
   Rainbower MyRainbow;
   Scannerer MyScanner(pStrand);
   FireworksEffects Firework(pStrand);
@@ -649,7 +614,7 @@ bool LedEffect(int aEffectNum, int aDuration_ms)
   if (aEffectNum > 7 && aEffectNum < 60)
   {
     ws2812fx.stop();
-    pixelColor_t RandomColor = pixelFromRGB(rand() % 256, rand() % 256, rand() % 256);
+    pixelColor_t RandomColor = pixelFromRGB(esp_random() % 256, esp_random() % 256, esp_random() % 256);
     ws2812fx.setColor(RandomColor);
     ws2812fx.setMode(aEffectNum);
     ws2812fx.start();
@@ -731,16 +696,10 @@ bool LedEffect(int aEffectNum, int aDuration_ms)
 
     case 6:
     {
-      pixelColor_t GreenColor = pixelFromRGB(rand() % 256, rand() % 256, rand() % 256);
-      pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
+      pixelColor_t RandColor = pixelFromRGB(esp_random() % 256, esp_random() % 256, esp_random() % 256);
       for (int i = 1; i <= 100; i++)
       {
-        vector<uint8_t> Leds = GetLEDsPercent(i);
-        for (int t = 0; t < pStrand->numPixels; t++)
-          pStrand->pixels[t] = BlackColor;
-        for (int t = 0; t < Leds.size(); t++)
-          pStrand->pixels[Leds.at(t)] = GreenColor;
-        digitalLeds_drawPixels(MyStrand, STRANDCNT);
+        SetCactusPercent(i, RandColor);
         delay(10);
       }
       break;
@@ -758,9 +717,7 @@ bool LedEffect(int aEffectNum, int aDuration_ms)
     {
       ws2812fx.service();
     }
-    toggle = !toggle;
     i++;
-    gpio_set_level(GPIO_NUM_2, (uint32_t)toggle);
   }
   return gUserBreak;
 }
@@ -955,15 +912,67 @@ int CheckRGB(std::string &rs, std::string &gs, std::string &bs, int &r, int &g, 
   return ERR_OK;
 }
 
-void SetCactusPercent(int aPercentage, pixelColor_t aColor)
+// digitales Abbild des Kaktus, jeden cm abgerastert von unten nach oben
+const vector<vector<uint8_t>> cactus{
+    {0, 143},
+    {1, 2, 142},
+    {3, 4, 140, 141},
+    {5, 139},
+    {6, 138},
+    {7, 8, 136, 137},
+    {9, 135},
+    {10, 133, 134},
+    {11, 131, 132},
+    {12, 13, 127, 128, 129, 130},
+    {14, 15, 16, 125, 126, 96, 97, 98, 99},
+    {17, 18, 19, 94, 95, 100, 101, 124, 123},
+    {20, 48, 49, 92, 93, 102, 103, 121, 122},
+    {21, 22, 46, 47, 50, 51, 90, 91, 104, 120},
+    {23, 44, 45, 52, 53, 88, 89, 105, 119},
+    {24, 43, 54, 87, 106, 107, 117, 118},
+    {25, 26, 41, 42, 55, 86, 108, 116},
+    {27, 40, 56, 57, 85, 109, 115},
+    {28, 29, 38, 39, 58, 59, 84, 83, 110, 111, 113, 114},
+    {30, 31, 37, 60, 81, 82, 112},
+    {32, 36, 61, 80},
+    {33, 34, 35, 62, 79, 78},
+    {63, 64, 77},
+    {65, 75, 76},
+    {66, 74, 67},
+    {68, 73},
+    {69, 72},
+    {70, 71},
+};
+
+void SetCactusPercent(int aPercent, pixelColor_t aColor)
 {
   strand_t *pStrand = &STRANDS[0];
   pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
-  vector<uint8_t> Leds = GetLEDsPercent(aPercentage);
+  double AlphaLastLine = 0;
+
+  const int Columns = cactus.size();
+  int MaxCol = int(Columns * (aPercent / 100.0) );
+  MaxCol++;
+  MaxCol = std::min(Columns, std::max(0, MaxCol));
+  // Leuchtstärke der obersten Zeile
+  AlphaLastLine = 1-(MaxCol- Columns * (aPercent / 100.0));
+  ESP_LOGI(TAG, "Using alpha of %.4f, percent=%d",AlphaLastLine, aPercent);
   for (int t = 0; t < pStrand->numPixels; t++)
     pStrand->pixels[t] = BlackColor;
-  for (int t = 0; t < Leds.size(); t++)
-    pStrand->pixels[Leds.at(t)] = aColor;
+
+  pixelColor_t ColorToUse;
+  for (int i = 0; i < MaxCol; i++)
+  {
+    // Iteration über eine Kaktuszeile
+    ColorToUse = aColor;
+    if (i == MaxCol - 1)
+      ColorToUse = pixelFromRGB((uint8_t)(aColor.r * AlphaLastLine ), (uint8_t)(aColor.g * AlphaLastLine ), (uint8_t)(aColor.b * AlphaLastLine ));
+    for (vector<uint8_t>::const_iterator it = cactus.at(i).begin(); it != cactus.at(i).end(); ++it)
+    {
+      pStrand->pixels[*it] = ColorToUse;
+    }
+  }
+
   strand_t *MyStrand[] = {pStrand};
   digitalLeds_drawPixels(MyStrand, STRANDCNT);
 }
