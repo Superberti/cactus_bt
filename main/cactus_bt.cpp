@@ -64,7 +64,8 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param);
 void app_cpp_main(void *);
 bool LedEffect(int aEffectNum, int aDuration_ms);
 int CheckRGB(std::string &, std::string &, std::string &, int &, int &, int &);
-void SetCactusPercent(int aPercentage, pixelColor_t aColor);
+void DrawCactusPercent(int aPercentage, pixelColor_t aColor, pixelColor_t aBackgroundColor, bool aDoNotDrawBackground = false);
+void DrawCactusLine(int aPercentage, pixelColor_t aColor, pixelColor_t aBackgroundColor, bool aDoNotDrawBackground = false);
 uint32_t ProcessCommandLine(char *aCmdLine);
 void DelayMilliseconds(uint32_t ms);
 
@@ -324,7 +325,7 @@ class Rainbower
 {
 private:
   const uint8_t color_div = 4;
-  const uint8_t anim_step = 5;
+  const uint8_t anim_step;
   uint8_t anim_max;
   uint8_t stepVal1;
   uint8_t stepVal2;
@@ -333,11 +334,12 @@ private:
   pixelColor_t color2;
 
 public:
-  Rainbower();
+  Rainbower(uint8_t);
   pixelColor_t drawNext();
 };
 
-Rainbower::Rainbower()
+Rainbower::Rainbower(uint8_t aAnimStep = 5)
+    : anim_step(aAnimStep)
 {
   anim_max = 255 - anim_step;
   stepVal1 = 0;
@@ -502,25 +504,24 @@ void app_cpp_main(void *pvParameters)
 
   uint32_t CurrentTime = 0;
   uint32_t LastTime = millis();
-  Rainbower MyRainbow;
+  Rainbower MyRainbow(10);
+  pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
   //bool ConnectMsg = true;
-  for (int i = 0; i <= 100; i += 5)
+  for (int i = 0; i <= 100; i ++)
   {
     MyRainbow.drawNext();
-    MyRainbow.drawNext();
     pixelColor_t Color = MyRainbow.drawNext();
-    SetCactusPercent(i, Color);
-    delay(50);
+    DrawCactusPercent(i, Color, BlackColor);
+    delay(10);
   }
 
   delay(500);
-  for (int i = 100; i >= 0; i -= 5)
+  for (int i = 100; i >= 0; i --)
   {
     MyRainbow.drawNext();
-    MyRainbow.drawNext();
     pixelColor_t Color = MyRainbow.drawNext();
-    SetCactusPercent(i, Color);
-    delay(50);
+    DrawCactusPercent(i, Color, BlackColor);
+    delay(10);
   }
   std::vector<int> DemoVec;
   strand_t *pStrand = &STRANDS[0];
@@ -564,38 +565,13 @@ void app_cpp_main(void *pvParameters)
       gpio_set_level(GPIO_NUM_5, smConnected ? 0 : (uint32_t)toggle);
       gpio_set_level(GPIO_NUM_2, (uint32_t)toggle);
       LastTime = CurrentTime;
-      /*
-      if (smConnected)
-      {
-        if (ConnectMsg)
-        {
-          ConnectMsg = false;
-          pixelColor_t Color = pixelFromRGB(0, 100, 0);
-          SetCactusPercent(100, Color);
-          delay(50);
-          SetCactusPercent(0, Color);
-          delay(50);
-          SetCactusPercent(100, Color);
-          delay(50);
-          SetCactusPercent(0, Color);
-        }
-
-        toggle = !toggle;
-        gpio_set_level(GPIO_NUM_2, (uint32_t)toggle);
-      }
-      else
-      {
-        ConnectMsg = true;
-        pixelColor_t Color = pixelFromRGB(30, 0, 0);
-        SetCactusPercent(100, Color);
-        delay(50);
-        SetCactusPercent(0, Color);
-      }*/
     }
     delay(10);
   }
   vTaskDelete(NULL);
 }
+
+static Rainbower NewRainbow(5);
 
 bool LedEffect(int aEffectNum, int aDuration_ms)
 {
@@ -696,11 +672,26 @@ bool LedEffect(int aEffectNum, int aDuration_ms)
 
     case 6:
     {
+      pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
+      /*
       pixelColor_t RandColor = pixelFromRGB(esp_random() % 256, esp_random() % 256, esp_random() % 256);
       for (int i = 1; i <= 100; i++)
       {
-        SetCactusPercent(i, RandColor);
+        DrawCactusPercent(i, RandColor, BlackColor, true);
         delay(10);
+      }*/
+      
+      for (int i = 1; i <= 100; i++)
+      {
+        pixelColor_t MyColor = NewRainbow.drawNext();
+        DrawCactusLine(i, MyColor, BlackColor);
+        delay(5);
+      }
+      for (int i = 100; i >= 0; i--)
+      {
+        pixelColor_t MyColor = NewRainbow.drawNext();
+        DrawCactusLine(i, MyColor, BlackColor);
+        delay(5);
       }
       break;
     }
@@ -873,7 +864,8 @@ uint32_t ProcessCommandLine(char *aCmdLine)
       return Err;
     }
     pixelColor_t Color = pixelFromRGB(r, g, b);
-    SetCactusPercent(FillPercent, Color);
+    pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
+    DrawCactusPercent(FillPercent, Color, BlackColor);
     break;
   }
   default:
@@ -914,7 +906,7 @@ int CheckRGB(std::string &rs, std::string &gs, std::string &bs, int &r, int &g, 
 
 // digitales Abbild des Kaktus, jeden cm abgerastert von unten nach oben
 const vector<vector<uint8_t>> cactus{
-    {0, 143},
+    {0, 143}, // unten
     {1, 2, 142},
     {3, 4, 140, 141},
     {5, 139},
@@ -941,24 +933,26 @@ const vector<vector<uint8_t>> cactus{
     {66, 74, 67},
     {68, 73},
     {69, 72},
-    {70, 71},
+    {70, 71}, // oben
 };
 
-void SetCactusPercent(int aPercent, pixelColor_t aColor)
+void DrawCactusPercent(int aPercent, pixelColor_t aColor, pixelColor_t aBackgroundColor, bool aDoNotDrawBackground)
 {
   strand_t *pStrand = &STRANDS[0];
-  pixelColor_t BlackColor = pixelFromRGB(0, 0, 0);
   double AlphaLastLine = 0;
 
   const int Columns = cactus.size();
-  int MaxCol = int(Columns * (aPercent / 100.0) );
+  int MaxCol = int(Columns * (aPercent / 100.0));
   MaxCol++;
   MaxCol = std::min(Columns, std::max(0, MaxCol));
   // Leuchtstärke der obersten Zeile
-  AlphaLastLine = 1-(MaxCol- Columns * (aPercent / 100.0));
-  ESP_LOGI(TAG, "Using alpha of %.4f, percent=%d",AlphaLastLine, aPercent);
-  for (int t = 0; t < pStrand->numPixels; t++)
-    pStrand->pixels[t] = BlackColor;
+  AlphaLastLine = 1 - (MaxCol - Columns * (aPercent / 100.0));
+  //ESP_LOGI(TAG, "Using alpha of %.4f, percent=%d", AlphaLastLine, aPercent);
+  if (!aDoNotDrawBackground)
+  {
+    for (int t = 0; t < pStrand->numPixels; t++)
+      pStrand->pixels[t] = aBackgroundColor;
+  }
 
   pixelColor_t ColorToUse;
   for (int i = 0; i < MaxCol; i++)
@@ -966,13 +960,46 @@ void SetCactusPercent(int aPercent, pixelColor_t aColor)
     // Iteration über eine Kaktuszeile
     ColorToUse = aColor;
     if (i == MaxCol - 1)
-      ColorToUse = pixelFromRGB((uint8_t)(aColor.r * AlphaLastLine ), (uint8_t)(aColor.g * AlphaLastLine ), (uint8_t)(aColor.b * AlphaLastLine ));
+      ColorToUse = pixelFromRGB((uint8_t)(aColor.r * AlphaLastLine), (uint8_t)(aColor.g * AlphaLastLine), (uint8_t)(aColor.b * AlphaLastLine));
     for (vector<uint8_t>::const_iterator it = cactus.at(i).begin(); it != cactus.at(i).end(); ++it)
     {
       pStrand->pixels[*it] = ColorToUse;
     }
   }
 
+  strand_t *MyStrand[] = {pStrand};
+  digitalLeds_drawPixels(MyStrand, STRANDCNT);
+}
+
+void DrawCactusLine(int aPercent, pixelColor_t aColor, pixelColor_t aBackgroundColor, bool aDoNotDrawBackground)
+{
+  strand_t *pStrand = &STRANDS[0];
+
+  const int Columns = cactus.size();
+  int Col = std::min(Columns - 2, std::max(0, int(Columns * (aPercent / 100.0))));
+  // Leuchtstärke der Zeile
+  double AlphaCol = 1 - (Columns * (aPercent / 100.0) - Col);
+  // Leuchtstärke der darüber liegenden Zeile
+  double AlphaTopCol = 1 - AlphaCol;
+  //ESP_LOGI(TAG, "Using AlphaCol=%.4f, AlphaTopCol=%4f", AlphaCol, AlphaTopCol);
+  pixelColor_t ColColor = pixelFromRGB((uint8_t)(aColor.r * AlphaCol), (uint8_t)(aColor.g * AlphaCol), (uint8_t)(aColor.b * AlphaCol));
+  pixelColor_t TopColColor = pixelFromRGB((uint8_t)(aColor.r * AlphaTopCol), (uint8_t)(aColor.g * AlphaTopCol), (uint8_t)(aColor.b * AlphaTopCol));
+
+  if (!aDoNotDrawBackground)
+  {
+    for (int t = 0; t < pStrand->numPixels; t++)
+      pStrand->pixels[t] = aBackgroundColor;
+  }
+
+  for (vector<uint8_t>::const_iterator it = cactus.at(Col).begin(); it != cactus.at(Col).end(); ++it)
+  {
+    pStrand->pixels[*it] = ColColor;
+  }
+
+  for (vector<uint8_t>::const_iterator it = cactus.at(Col + 1).begin(); it != cactus.at(Col + 1).end(); ++it)
+  {
+    pStrand->pixels[*it] = TopColColor;
+  }
   strand_t *MyStrand[] = {pStrand};
   digitalLeds_drawPixels(MyStrand, STRANDCNT);
 }
